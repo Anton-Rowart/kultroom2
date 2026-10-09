@@ -2,10 +2,11 @@ import {
   BadGatewayException,
   BadRequestException,
   Injectable,
+  Logger,
 } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, open, rename, stat, unlink } from "node:fs/promises";
+import { mkdir, open, readdir, rename, stat, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -24,8 +25,10 @@ type ResolvedMovie = {
 
 @Injectable()
 export class MediaService {
+  private readonly logger = new Logger(MediaService.name);
   private readonly cacheDir = resolve(process.cwd(), "cache/media");
   private readonly caching = new Set<string>();
+  private trimInFlight: Promise<void> | null = null;
   private readonly resolutionCache = new Map<
     string,
     { value: ResolvedMovie; expiresAt: number }
@@ -263,7 +266,7 @@ export class MediaService {
     try {
       await pipeline(Readable.fromWeb(body as never), file.createWriteStream());
       await rename(temporary, path);
-      void this.trimCache();
+      this.scheduleCacheTrim();
     } catch {
       await unlink(temporary).catch(() => undefined);
     }
@@ -322,22 +325,55 @@ export class MediaService {
   }
 
   private async trimCache() {
-    const { readdir } = await import("node:fs/promises");
     const entries = await readdir(this.cacheDir).catch(() => []);
-    const files = await Promise.all(
+    const candidates = await Promise.all(
       entries
         .filter((name) => !name.endsWith(".tmp"))
-        .map(async (name) => ({
-          path: resolve(this.cacheDir, name),
-          info: await stat(resolve(this.cacheDir, name)),
-        })),
+        .map(async (name) => {
+          const path = resolve(this.cacheDir, name);
+          try {
+            return { path, info: await stat(path) };
+          } catch (error) {
+            // A cached segment may disappear after readdir() if another
+            // process cleans the same shared cache directory.
+            if (this.isMissingFile(error)) return null;
+            throw error;
+          }
+        }),
     );
+    const files = candidates.filter((file) => file !== null);
     let total = files.reduce((sum, file) => sum + file.info.size, 0);
     for (const file of files.sort((a, b) => a.info.mtimeMs - b.info.mtimeMs)) {
       if (total <= this.maxBytes) break;
-      await unlink(file.path).catch(() => undefined);
+      try {
+        await unlink(file.path);
+      } catch (error) {
+        if (!this.isMissingFile(error)) throw error;
+      }
       total -= file.info.size;
     }
+  }
+
+  private scheduleCacheTrim() {
+    // Segment requests finish concurrently. Only one cleanup pass may inspect
+    // and delete cache files at a time inside this process.
+    if (this.trimInFlight) return;
+    this.trimInFlight = this.trimCache()
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Не удалось очистить медиакэш: ${message}`);
+      })
+      .finally(() => {
+        this.trimInFlight = null;
+      });
+  }
+
+  private isMissingFile(error: unknown): error is NodeJS.ErrnoException {
+    return (
+      error instanceof Error &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    );
   }
 
   private allowedUrl(value: string) {
