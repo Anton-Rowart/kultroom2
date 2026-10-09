@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+*.tsbuildinfo
+apps/api/cache/
+apps/api/data/movies.local.json
+.env
+.env.local

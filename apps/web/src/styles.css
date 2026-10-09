@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, sans-serif;
+  color: #f5f5f7;
+  background: #000;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body { background: #000; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+
+@keyframes kult-noise {
+  0% { transform: translate(0); }
+  25% { transform: translate(-3%, 2%); }
+  50% { transform: translate(3%, -4%); }
+  75% { transform: translate(-4%, 3%); }
+  100% { transform: translate(2%, -2%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kult-noise { animation: none !important; }
+  * { scroll-behavior: auto !important; }
+}

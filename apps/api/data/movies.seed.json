@@ -1,0 +1,5 @@
+[
+  {"id":"474","kinopoiskId":"474","title":"Гладиатор","originalTitle":"Gladiator","year":2000,"type":"Фильм","kinopoiskUrl":"https://www.kinopoisk.ru/film/474/","posterUrl":"/assets/posters/gladiator.jpg","createdAt":"2026-10-09T00:00:00.000Z"},
+  {"id":"7450","kinopoiskId":"7450","title":"Кладбище домашних животных","originalTitle":"Pet Sematary","year":1989,"type":"Фильм","kinopoiskUrl":"https://www.kinopoisk.ru/film/7450/","posterUrl":"/assets/posters/pet-sematary.jpg","createdAt":"2026-10-09T00:00:01.000Z"},
+  {"id":"522892","kinopoiskId":"522892","title":"Иллюзия обмана","originalTitle":"Now You See Me","year":2013,"type":"Фильм","kinopoiskUrl":"https://www.kinopoisk.ru/film/522892/","posterUrl":"/assets/posters/now-you-see-me.jpg","createdAt":"2026-10-09T00:00:02.000Z"}
+]
