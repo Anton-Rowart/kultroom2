@@ -3,7 +3,7 @@ import { Check, Copy, X } from "lucide-react";
 import { useParams } from "react-router";
 import { io, type Socket } from "socket.io-client";
 import { api, API_URL } from "../../shared/api/client";
-import { session } from "../../shared/session";
+import { createId, session } from "../../shared/session";
 import type { Movie } from "../movies/types";
 import { VideoPlayer, type PlaybackCommand } from "./VideoPlayer";
 
@@ -56,7 +56,7 @@ export function RoomPage() {
     socket.on(
       "reaction",
       ({ emoji, name }: { emoji: string; name: string }) => {
-        const id = crypto.randomUUID();
+        const id = createId();
         setReactions((items) => [
           ...items.slice(-7),
           { id, emoji, name: name || "Пользователь" },
