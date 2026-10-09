@@ -32,6 +32,9 @@ type Props = {
 type QualityOption = { value: string; label: string };
 type BufferedRange = { start: number; end: number };
 
+const QUALITY_PREFERENCE_KEY = "kultroom:video-quality";
+const AUTO_MAX_HEIGHT = 720;
+
 const reactionOptions = [
   ["🤡", "Клоун"],
   ["❤️", "Сердце"],
@@ -185,29 +188,19 @@ export function VideoPlayer({
             }));
           setQualityOptions(options);
           const preference =
-            sessionStorage.getItem("kult-test-quality") || "auto";
-          if (preference === "auto") {
-            hls.currentLevel = -1;
+            localStorage.getItem(QUALITY_PREFERENCE_KEY) || "auto";
+          const preferredLevel = levels.findIndex(
+            (level) => qualityKey(level) === preference,
+          );
+          if (preference === "auto" || preferredLevel < 0) {
+            enableCappedAutoQuality(hls, levels);
             setQuality("auto");
+            localStorage.setItem(QUALITY_PREFERENCE_KEY, "auto");
           } else {
-            let index =
-              preference === "max"
-                ? levels.reduce(
-                    (best, level, current) =>
-                      qualityWeight(level) > qualityWeight(levels[best])
-                        ? current
-                        : best,
-                    0,
-                  )
-                : levels.findIndex((level) => qualityKey(level) === preference);
-            if (index < 0) index = 0;
-            hls.currentLevel = index;
-            hls.nextLevel = index;
-            setQuality(String(index));
-            sessionStorage.setItem(
-              "kult-test-quality",
-              qualityKey(levels[index]),
-            );
+            hls.autoLevelCapping = -1;
+            hls.currentLevel = preferredLevel;
+            hls.nextLevel = preferredLevel;
+            setQuality(String(preferredLevel));
           }
           setState("ready");
           if (resumeAt > 0) video.currentTime = resumeAt;
@@ -718,19 +711,20 @@ export function VideoPlayer({
               if (!hls) return;
               setQuality(event.target.value);
               if (event.target.value === "auto") {
-                hls.currentLevel = -1;
-                sessionStorage.setItem("kult-test-quality", "auto");
+                enableCappedAutoQuality(hls, hls.levels);
+                localStorage.setItem(QUALITY_PREFERENCE_KEY, "auto");
               } else {
                 const index = Number(event.target.value);
                 const level = hls.levels[index];
                 if (!level) return;
+                hls.autoLevelCapping = -1;
                 hls.currentLevel = index;
                 hls.nextLevel = index;
-                sessionStorage.setItem("kult-test-quality", qualityKey(level));
+                localStorage.setItem(QUALITY_PREFERENCE_KEY, qualityKey(level));
               }
             }}
           >
-            <option value="auto">Auto</option>
+            <option value="auto">Auto · до 720p</option>
             {qualityOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -773,6 +767,29 @@ function qualityLabel(level: Level) {
 }
 function qualityKey(level: Level) {
   return `${level.width || 0}x${level.height || 0}`;
+}
+function enableCappedAutoQuality(hls: Hls, levels: Level[]) {
+  hls.autoLevelCapping = autoQualityCap(levels);
+  hls.currentLevel = -1;
+  hls.nextLevel = -1;
+}
+function autoQualityCap(levels: Level[]) {
+  if (!levels.length) return -1;
+  const eligible = levels
+    .map((level, index) => ({ level, index }))
+    .filter(({ level }) =>
+      level.height
+        ? level.height <= AUTO_MAX_HEIGHT
+        : level.width
+          ? level.width <= 1280
+          : true,
+    );
+  const available = eligible.length
+    ? eligible
+    : levels.map((level, index) => ({ level, index }));
+  return available.reduce((best, current) =>
+    qualityWeight(current.level) > qualityWeight(best.level) ? current : best,
+  ).index;
 }
 function formatTime(seconds: number) {
   if (!Number.isFinite(seconds)) return "00:00";
