@@ -113,10 +113,7 @@ export class MediaService {
       }
     }
 
-    const upstreamResponse = await fetch(upstream, {
-      headers: range ? { range } : {},
-      signal: AbortSignal.timeout(this.upstreamTimeout),
-    });
+    const upstreamResponse = await this.fetchMedia(upstream, range);
     if (!upstreamResponse.ok || !upstreamResponse.body)
       throw new BadGatewayException(`Сегмент: HTTP ${upstreamResponse.status}`);
 
@@ -297,8 +294,30 @@ export class MediaService {
   private async pipeResponse(stream: NodeJS.ReadableStream, response: Response) {
     try {
       await pipeline(stream, response);
-    } catch (error) {
-      if (!response.destroyed) response.destroy(error as Error);
+    } catch {
+      // A browser can cancel a segment while seeking or changing quality.
+      // The stream is already rejected by pipeline; forwarding the same error
+      // to Express can emit it again after the pipeline listeners are removed.
+      if (!response.destroyed) response.destroy();
+    }
+  }
+
+  private async fetchMedia(upstream: URL, range?: string) {
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(new Error("Медиаисточник не ответил вовремя")),
+      this.upstreamTimeout,
+    );
+    timer.unref();
+    try {
+      // This timeout protects only the connection and response headers. Media
+      // bodies can legitimately stream for longer than a minute.
+      return await fetch(upstream, {
+        headers: range ? { range } : {},
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
     }
   }
 
