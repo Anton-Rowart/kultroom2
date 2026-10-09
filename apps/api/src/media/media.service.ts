@@ -23,6 +23,12 @@ type ResolvedMovie = {
   variant: StreamVariant;
 };
 
+export type AudioTrackOption = {
+  name: string;
+  language?: string;
+  default: boolean;
+};
+
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
@@ -85,6 +91,36 @@ export class MediaService {
       .finally(() => this.resolutionInFlight.delete(kinopoiskId));
     this.resolutionInFlight.set(kinopoiskId, resolution);
     return resolution;
+  }
+
+  async audioTracks(kinopoiskId: string): Promise<AudioTrackOption[]> {
+    const resolved = await this.resolveMovie(kinopoiskId);
+    const playlist = await this.manifestText(
+      this.registerStreamUrl(resolved.variant.filepath),
+    );
+    const tracks = playlist
+      .split(/\r?\n/)
+      .filter(
+        (line) =>
+          line.startsWith("#EXT-X-MEDIA:") &&
+          /(?:^|,)TYPE=AUDIO(?:,|$)/.test(line.slice(13)),
+      )
+      .map((line, index) => {
+        const attributes = this.hlsAttributes(line.slice(13));
+        return {
+          name: attributes.NAME || `Дорожка ${index + 1}`,
+          language: attributes.LANGUAGE || undefined,
+          default: attributes.DEFAULT === "YES",
+        };
+      });
+    return [
+      ...new Map(
+        tracks.map((track) => [
+          `${track.name}\u0000${track.language || ""}`,
+          track,
+        ]),
+      ).values(),
+    ];
   }
 
   async proxy(rawUrl: string, request: Request, response: Response) {
@@ -374,6 +410,19 @@ export class MediaService {
       "code" in error &&
       (error as NodeJS.ErrnoException).code === "ENOENT"
     );
+  }
+
+  private hlsAttributes(value: string) {
+    const attributes: Record<string, string> = {};
+    for (const match of value.matchAll(
+      /(?:^|,)([A-Z0-9-]+)=("(?:[^"\\]|\\.)*"|[^,]*)/g,
+    )) {
+      const raw = match[2];
+      attributes[match[1]] = raw.startsWith('"')
+        ? raw.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\")
+        : raw;
+    }
+    return attributes;
   }
 
   private allowedUrl(value: string) {

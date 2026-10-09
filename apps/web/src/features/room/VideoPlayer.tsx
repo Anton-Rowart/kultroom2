@@ -19,6 +19,7 @@ export type ReactionEvent = { id: string; emoji: string; name: string };
 type PlayerState = "loading" | "error" | "ready" | "playing" | "paused";
 type Props = {
   movie: Movie | null;
+  audioTrackName: string;
   command: PlaybackCommand | null;
   reactions: ReactionEvent[];
   notice: string;
@@ -29,11 +30,10 @@ type Props = {
   }) => void;
   onReaction: (emoji: string) => void;
 };
-type QualityOption = { value: string; label: string };
 type BufferedRange = { start: number; end: number };
 
-const QUALITY_PREFERENCE_KEY = "kultroom:video-quality";
-const AUTO_MAX_HEIGHT = 720;
+const AUTO_MIN_HEIGHT = 480;
+const AUTO_MAX_HEIGHT = 1080;
 
 const reactionOptions = [
   ["🤡", "Клоун"],
@@ -47,6 +47,7 @@ const reactionOptions = [
 
 export function VideoPlayer({
   movie,
+  audioTrackName,
   command,
   reactions,
   notice,
@@ -76,12 +77,7 @@ export function VideoPlayer({
   const [buffering, setBuffering] = useState(false);
   const [reactionOpen, setReactionOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [qualityOptions, setQualityOptions] = useState<QualityOption[]>([]);
-  const [quality, setQuality] = useState("auto");
-  const [qualityTitle, setQualityTitle] = useState("");
-  const [voiceOptions, setVoiceOptions] = useState<QualityOption[]>([]);
-  const [voice, setVoice] = useState("0");
-  const [voiceTitle, setVoiceTitle] = useState("");
+  const [currentResolution, setCurrentResolution] = useState("Авто");
   const [canActivate, setCanActivate] = useState(false);
   const [activated, setActivated] = useState(false);
   const [activating, setActivating] = useState(false);
@@ -101,11 +97,11 @@ export function VideoPlayer({
     let disposed = false;
     let refreshAttempted = false;
     const video = videoRef.current;
-    const voiceKey = `kult-test-voice:${movie.kinopoiskId}`;
     setCanActivate(false);
     setActivated(false);
     setActivating(false);
     setActivationError("");
+    setCurrentResolution("Авто");
     failedVoiceNamesRef.current.clear();
 
     async function load(resumeAt = 0) {
@@ -175,47 +171,15 @@ export function VideoPlayer({
         hlsRef.current = hls;
         hls.on(Events.MANIFEST_PARSED, (_event, data) => {
           const levels = data.levels || [];
-          const options = levels
-            .map((level, index) => ({ level, index }))
-            .sort(
-              (a, b) =>
-                (b.level.width * b.level.height || b.level.bitrate) -
-                (a.level.width * a.level.height || a.level.bitrate),
-            )
-            .map(({ level, index }) => ({
-              value: String(index),
-              label: qualityLabel(level),
-            }));
-          setQualityOptions(options);
-          const preference =
-            localStorage.getItem(QUALITY_PREFERENCE_KEY) || "auto";
-          const preferredLevel = levels.findIndex(
-            (level) => qualityKey(level) === preference,
-          );
-          if (preference === "auto" || preferredLevel < 0) {
-            enableCappedAutoQuality(hls, levels);
-            setQuality("auto");
-            localStorage.setItem(QUALITY_PREFERENCE_KEY, "auto");
-          } else {
-            hls.autoLevelCapping = -1;
-            hls.currentLevel = preferredLevel;
-            hls.nextLevel = preferredLevel;
-            setQuality(String(preferredLevel));
-          }
+          enableBoundedAutoQuality(hls, levels);
           setState("ready");
           if (resumeAt > 0) video.currentTime = resumeAt;
         });
         hls.on(Events.AUDIO_TRACKS_UPDATED, (_event, data) => {
           const tracks = data.audioTracks || hls.audioTracks || [];
-          setVoiceOptions(
-            tracks.map((track, index) => ({
-              value: String(index),
-              label: track.name || track.lang || `Дорожка ${index + 1}`,
-            })),
-          );
           let selected = tracks.findIndex(
             (track, index) =>
-              track.name === sessionStorage.getItem(voiceKey) &&
+              track.name === audioTrackName &&
               !failedVoiceNamesRef.current.has(trackName(track, index)),
           );
           if (selected < 0)
@@ -231,22 +195,11 @@ export function VideoPlayer({
             );
           if (selected >= 0) {
             hls.audioTrack = selected;
-            setVoice(String(selected));
-            sessionStorage.setItem(voiceKey, trackName(tracks[selected], selected));
-          }
-        });
-        hls.on(Events.AUDIO_TRACK_SWITCHED, (_event, data) => {
-          const track = hls.audioTracks[data.id];
-          if (track) {
-            setVoice(String(data.id));
-            setVoiceTitle(
-              `Сейчас: ${track.name || track.lang || "Аудиодорожка"}`,
-            );
           }
         });
         hls.on(Events.LEVEL_SWITCHED, (_event, data) => {
           const level = hls.levels[data.level];
-          if (level) setQualityTitle(`Сейчас: ${qualityLabel(level)}`);
+          if (level) setCurrentResolution(qualityLabel(level));
         });
         hls.on(Events.BUFFER_APPENDED, () => updateProgress());
         hls.on(Events.FRAG_BUFFERED, () => updateProgress());
@@ -260,9 +213,7 @@ export function VideoPlayer({
               failedVoiceNamesRef.current.add(
                 trackName(failedTrack, hls.audioTrack),
               );
-            sessionStorage.removeItem(voiceKey);
             if (failedVoiceNamesRef.current.size < 3) {
-              setVoiceTitle("Озвучка недоступна — переключаем…");
               await load(video.currentTime || 0);
               return;
             }
@@ -291,7 +242,7 @@ export function VideoPlayer({
       hlsRef.current?.destroy();
       hlsRef.current = null;
     };
-  }, [movie, retryNonce]);
+  }, [audioTrackName, movie, retryNonce]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -589,7 +540,7 @@ export function VideoPlayer({
         aria-label="Воспроизвести"
         onClick={() => void togglePlayback()}
       >
-        ▶
+        <span aria-hidden="true">▶</span>
       </button>
       {reactionOpen && (
         <div className="reaction-panel">
@@ -671,66 +622,13 @@ export function VideoPlayer({
             }}
           />
           <span className="spacer" />
-          <select
-            className="badge quality-select voice-select"
-            aria-label="Озвучка"
-            value={voice}
-            title={voiceTitle}
-            disabled={voiceOptions.length < 2}
-            onChange={(event) => {
-              const index = Number(event.target.value);
-              const track = hlsRef.current?.audioTracks[index];
-              if (!track || !movie) return;
-              hlsRef.current!.audioTrack = index;
-              setVoice(event.target.value);
-              const name = track.name || track.lang || `Дорожка ${index + 1}`;
-              sessionStorage.setItem(
-                `kult-test-voice:${movie.kinopoiskId}`,
-                name,
-              );
-              setVoiceTitle(`Сейчас: ${name}`);
-            }}
+          <span
+            className="badge quality-indicator"
+            aria-label={`Текущее разрешение: ${currentResolution}`}
+            title="Качество меняется автоматически в диапазоне 480p–1080p"
           >
-            {voiceOptions.length ? (
-              voiceOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))
-            ) : (
-              <option value="0">Одна дорожка</option>
-            )}
-          </select>
-          <select
-            className="badge quality-select"
-            aria-label="Качество видео"
-            value={quality}
-            title={qualityTitle}
-            onChange={(event) => {
-              const hls = hlsRef.current;
-              if (!hls) return;
-              setQuality(event.target.value);
-              if (event.target.value === "auto") {
-                enableCappedAutoQuality(hls, hls.levels);
-                localStorage.setItem(QUALITY_PREFERENCE_KEY, "auto");
-              } else {
-                const index = Number(event.target.value);
-                const level = hls.levels[index];
-                if (!level) return;
-                hls.autoLevelCapping = -1;
-                hls.currentLevel = index;
-                hls.nextLevel = index;
-                localStorage.setItem(QUALITY_PREFERENCE_KEY, qualityKey(level));
-              }
-            }}
-          >
-            <option value="auto">Auto · до 720p</option>
-            {qualityOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            {currentResolution}
+          </span>
           <button
             className="icon-button"
             type="button"
@@ -765,10 +663,11 @@ function qualityLabel(level: Level) {
   if (level.height) return `${level.height}p`;
   return `${Math.round((level.bitrate || 0) / 1000)} Кбит/с`;
 }
-function qualityKey(level: Level) {
-  return `${level.width || 0}x${level.height || 0}`;
-}
-function enableCappedAutoQuality(hls: Hls, levels: Level[]) {
+function enableBoundedAutoQuality(hls: Hls, levels: Level[]) {
+  const floor = autoQualityFloor(levels);
+  hls.config.minAutoBitrate = floor
+    ? floor.level.maxBitrate || floor.level.bitrate || 0
+    : 0;
   hls.autoLevelCapping = autoQualityCap(levels);
   hls.currentLevel = -1;
   hls.nextLevel = -1;
@@ -777,19 +676,38 @@ function autoQualityCap(levels: Level[]) {
   if (!levels.length) return -1;
   const eligible = levels
     .map((level, index) => ({ level, index }))
-    .filter(({ level }) =>
-      level.height
-        ? level.height <= AUTO_MAX_HEIGHT
-        : level.width
-          ? level.width <= 1280
-          : true,
-    );
+    .filter(({ level }) => nominalQualityHeight(level) <= AUTO_MAX_HEIGHT);
   const available = eligible.length
     ? eligible
     : levels.map((level, index) => ({ level, index }));
   return available.reduce((best, current) =>
     qualityWeight(current.level) > qualityWeight(best.level) ? current : best,
   ).index;
+}
+function autoQualityFloor(levels: Level[]) {
+  const eligible = levels
+    .map((level, index) => ({ level, index }))
+    .filter(
+      ({ level }) =>
+        nominalQualityHeight(level) >= AUTO_MIN_HEIGHT &&
+        nominalQualityHeight(level) <= AUTO_MAX_HEIGHT,
+    );
+  if (!eligible.length) return null;
+  return eligible.reduce((best, current) =>
+    qualityWeight(current.level) < qualityWeight(best.level) ? current : best,
+  );
+}
+function nominalQualityHeight(level: Level) {
+  const measured = Math.max(
+    level.height || 0,
+    level.width ? (level.width * 9) / 16 : 0,
+  );
+  const standards = [240, 360, 480, 720, 1080, 1440, 2160];
+  return standards.reduce((closest, current) =>
+    Math.abs(current - measured) < Math.abs(closest - measured)
+      ? current
+      : closest,
+  );
 }
 function formatTime(seconds: number) {
   if (!Number.isFinite(seconds)) return "00:00";

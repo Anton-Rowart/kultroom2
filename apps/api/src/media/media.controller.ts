@@ -16,6 +16,11 @@ export class MediaController {
   @Get("resolve/:kinopoiskId") resolve(@Param("kinopoiskId") id: string) {
     return this.media.resolveMovie(id);
   }
+  @Get("audio-tracks/:kinopoiskId") audioTracks(
+    @Param("kinopoiskId") id: string,
+  ) {
+    return this.media.audioTracks(id);
+  }
   @Get("proxy") proxy(
     @Query("url") url: string,
     @Req() request: Request,

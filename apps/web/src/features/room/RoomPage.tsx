@@ -18,6 +18,7 @@ type Participant = {
 type RoomState = {
   id: string;
   movieId: string;
+  audioTrackName: string;
   hostId: string;
   participants: Participant[];
   playback: PlaybackCommand;
@@ -28,7 +29,9 @@ export function RoomPage() {
   const [state, setState] = useState<RoomState | null>(null);
   const [command, setCommand] = useState<PlaybackCommand | null>(null);
   const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [shareStatus, setShareStatus] = useState<
+    "idle" | "copied" | "error"
+  >("idle");
   const [reactions, setReactions] = useState<
     { id: string; emoji: string; name: string }[]
   >([]);
@@ -91,16 +94,24 @@ export function RoomPage() {
       socket.disconnect();
     };
   }, [roomId, userId]);
-  function share() {
-    navigator.clipboard.writeText(location.href).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    });
+  async function share() {
+    try {
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(location.href);
+      } else if (!copyWithoutClipboardApi(location.href)) {
+        throw new Error("Браузер запретил копирование");
+      }
+      setShareStatus("copied");
+    } catch {
+      setShareStatus("error");
+    }
+    setTimeout(() => setShareStatus("idle"), 1800);
   }
   return (
     <main className="fixed inset-0 overflow-hidden bg-black text-[#f5f5f7]">
       <VideoPlayer
         movie={movie}
+        audioTrackName={state?.audioTrackName || ""}
         command={command}
         reactions={reactions}
         notice={notice}
@@ -124,13 +135,13 @@ export function RoomPage() {
         }
       />
       <button
-        className={`fixed top-6 right-6 z-10 size-[54px] rounded-[17px] border-0 bg-transparent p-0 shadow-[0_12px_40px_rgba(0,0,0,.53)] transition duration-250 ${open ? "pointer-events-none translate-x-5 opacity-0" : ""}`}
+        className={`fixed top-6 right-6 z-40 size-[54px] rounded-[17px] border-0 bg-transparent p-0 shadow-[0_12px_40px_rgba(0,0,0,.53)] transition duration-250 ${open ? "pointer-events-none translate-x-5 opacity-0" : ""}`}
         onClick={() => setOpen(true)}
         aria-label="Открыть комнату"
       >
         <img className="size-full" src="/assets/kult-mark.svg" alt="K" />
       </button>
-      <aside className={`fixed top-3.5 right-3.5 bottom-3.5 z-20 flex w-[min(440px,calc(100vw-28px))] flex-col gap-8 rounded-[28px] border border-white/10 bg-[#2c2c2ef2] p-5 shadow-[0_30px_90px_rgba(0,0,0,.73)] backdrop-blur-[34px] transition-transform duration-300 ease-[cubic-bezier(.2,.8,.2,1)] ${open ? "translate-x-0" : "translate-x-[calc(100%+28px)]"}`}>
+      <aside className={`fixed top-3.5 right-3.5 bottom-3.5 z-50 flex w-[min(440px,calc(100vw-28px))] flex-col gap-8 rounded-[28px] border border-white/10 bg-[#2c2c2ef2] p-5 shadow-[0_30px_90px_rgba(0,0,0,.73)] backdrop-blur-[34px] transition-transform duration-300 ease-[cubic-bezier(.2,.8,.2,1)] ${open ? "translate-x-0" : "translate-x-[calc(100%+28px)]"}`}>
         <header className="flex items-center justify-between">
           <img className="w-28" src="/assets/kult-wordmark.svg" alt="Kult" />
           <button className="grid size-[38px] place-items-center rounded-full border-0 bg-white/5" onClick={() => setOpen(false)} aria-label="Закрыть">
@@ -189,13 +200,29 @@ export function RoomPage() {
             ))}
           </div>
         </section>
-        <button className="mt-auto flex items-center justify-center gap-2 rounded-[15px] border-0 bg-[#f5f5f7] p-3.5 font-semibold text-[#111]" onClick={share}>
-          {copied ? <Check /> : <Copy />}
-          {copied ? "Ссылка скопирована" : "Поделиться"}
+        <button type="button" className="mt-auto flex cursor-pointer items-center justify-center gap-2 rounded-[15px] border-0 bg-[#f5f5f7] p-3.5 font-semibold text-[#111]" onClick={() => void share()}>
+          {shareStatus === "copied" ? <Check /> : <Copy />}
+          {shareStatus === "copied"
+            ? "Ссылка скопирована"
+            : shareStatus === "error"
+              ? "Не удалось скопировать"
+              : "Поделиться"}
         </button>
       </aside>
     </main>
   );
+}
+function copyWithoutClipboardApi(value: string) {
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.append(input);
+  input.select();
+  const copied = document.execCommand("copy");
+  input.remove();
+  return copied;
 }
 function formatTime(value: number) {
   const seconds = Math.max(0, Math.floor(value || 0));

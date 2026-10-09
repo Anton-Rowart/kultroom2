@@ -14,6 +14,7 @@ export type Participant = {
 export type Room = {
   id: string;
   movieId: string;
+  audioTrackName: string;
   hostId: string;
   createdAt: number;
   participants: Map<string, Participant>;
@@ -30,7 +31,7 @@ export class RoomsService {
   private readonly rooms = new Map<string, Room>();
   private readonly cleanupTimers = new Map<string, NodeJS.Timeout>();
 
-  create(movieId: string, hostId: string) {
+  create(movieId: string, hostId: string, audioTrackName: string) {
     let id = "";
     do {
       id = String(randomInt(100000, 1000000));
@@ -38,6 +39,7 @@ export class RoomsService {
     const room: Room = {
       id,
       movieId,
+      audioTrackName,
       hostId,
       createdAt: Date.now(),
       participants: new Map(),
@@ -62,6 +64,7 @@ export class RoomsService {
     return {
       id: room.id,
       movieId: room.movieId,
+      audioTrackName: room.audioTrackName,
       hostId: room.hostId,
       playback: room.playback,
       participants: [...room.participants.values()].map(
